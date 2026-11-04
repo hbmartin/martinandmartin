@@ -8,11 +8,13 @@ A title card with locally served Geist Pixel Circle, smooth cursor-driven CMY pl
 - `npm run dev` starts the review build. Open `/?tune` to show its controls.
 - `npm run typecheck && npm test` checks types and runs the Chromium browser tests against built files with their CSP enabled. Run `npm test -- --browser=webkit` for WebKit coverage as well. Install the browsers with `npx playwright install chromium webkit` if needed.
 - `npm run build && npm run check:dist` builds and checks the production candidate in `dist/`. `npm run build:review` builds the review in `dist-review/`.
-- `uv run --script scripts/make-assets.py` regenerates the pinned Circle subset, the social card, and the favicon, and removes unused font variants.
+- `uv run --script scripts/make-assets.py` regenerates the pinned Circle subset, the social card, and the SVG/ICO favicons, and removes unused font variants. The favicon uses the Circle ampersand's vector outlines on a rounded dark tile with subtle CMY fringes; the antialiased ICO contains 16, 32 and 48-pixel versions.
 
 ## Water and typography
 
 Circle is the only font in both builds and the no-JavaScript fallback. Old tuning links with a different `shape` are accepted but always render Circle. Font failure or timeout still uses system monospace.
+
+Both builds default to 4.5% maximum CMY separation and 250 ms cursor smoothing. Mouse input responds throughout the text fade, including positions received while the font loads, and opening replay preserves the follow position. Touch keeps its gradual entrance. Explicit values in review tuning URLs override these defaults.
 
 The review panel offers **Quiet Black Pool** (the default) and **Reflective Liquid**. They share the same wave motion and CMY refraction; Reflective Liquid uses broader, stronger reflections. Copied version-1 URLs include `settings.waterLook`; absent or invalid values use `quiet`. There is no water toggle on the public page.
 

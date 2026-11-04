@@ -9,6 +9,9 @@ from pathlib import Path
 from urllib.request import urlopen
 import json
 from fontTools import subset
+from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.svgPathPen import SVGPathPen
+from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
@@ -61,13 +64,39 @@ for color, offset in zip(("#00ffff", "#ff00ff", "#ffff00"), ((-3, -1), (2, -2), 
     card = ImageChops.screen(card, plate)
 card.save(PUBLIC / "share.png", optimize=True)
 
-icon = Image.new("L", (32, 32))
-font = ImageFont.truetype(BytesIO(original), 35)
-l, t, r, b = font.getbbox("&")
-ImageDraw.Draw(icon).text((16 - (l + r) / 2, 16 - (t + b) / 2), "&", font=font, fill=255)
-path = "".join(f"M{x} {y}h1v1h-1z" for y in range(32) for x in range(32)
-               if icon.getpixel((x, y)) >= 128)
+# Extract the actual Circle outlines rather than tracing a thresholded bitmap.
+# The same ink bounds, palette and offsets drive the SVG and raster fallback.
+source = TTFont(BytesIO(original))
+glyphs = source.getGlyphSet()
+ampersand = glyphs[source.getBestCmap()[ord("&")]]
+bounds = BoundsPen(glyphs)
+ampersand.draw(bounds)
+left, bottom, right, top = bounds.bounds
+scale = 24 / max(right - left, top - bottom)
+translate_x = 16 - (left + right) * scale / 2
+translate_y = 16 + (bottom + top) * scale / 2
+pen = SVGPathPen(glyphs, ntos=lambda n: f"{n:.3f}".rstrip("0").rstrip("."))
+ampersand.draw(TransformPen(pen, (scale, 0, 0, -scale, translate_x, translate_y)))
+layers = [("#00ffff", -.5, .15), ("#ff00ff", .5, -.25), ("#ffff00", .25, .5), ("#ffffff", 0, 0)]
+uses = "".join(f'<use href="#ampersand" fill="{color}" transform="translate({x} {y})"/>'
+               for color, x, y in layers)
 (PUBLIC / "favicon.svg").write_text(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-    '<path fill="#0a0a0a" d="M0 0h32v32H0z"/>'
-    f'<path fill="#fff" d="{path}"/></svg>\n')
+    '<rect width="32" height="32" rx="6" fill="#0a0a0a"/>'
+    f'<defs><path id="ampersand" d="{pen.getCommands()}"/></defs>{uses}</svg>\n')
+
+# Supersampling retains smooth curves, fringes and rounded transparent corners
+# in every ICO size, including browsers that display the 16-pixel fallback.
+supersample = 16
+size = 32 * supersample
+icon = Image.new("RGBA", (size, size))
+ImageDraw.Draw(icon).rounded_rectangle((0, 0, size - 1, size - 1), radius=6 * supersample, fill="#0a0a0a")
+font = ImageFont.truetype(BytesIO(original), round(source["head"].unitsPerEm * scale * supersample))
+l, t, r, b = font.getbbox("&", anchor="ls")
+for color, x, y in layers:
+    plate = Image.new("RGBA", icon.size)
+    ImageDraw.Draw(plate).text((size / 2 - (l + r) / 2 + x * supersample,
+                               size / 2 - (t + b) / 2 + y * supersample),
+                              "&", font=font, anchor="ls", fill=color)
+    icon = Image.alpha_composite(icon, plate)
+icon.save(PUBLIC / "favicon.ico", format="ICO", sizes=[(16, 16), (32, 32), (48, 48)])
