@@ -48,7 +48,28 @@ async function restart(page: Page, step = 16) {
   await advance(page, 3000, step)
 }
 
-async function frame(page: Page) { return PNG.sync.read(await page.locator('#stage').screenshot()) }
+const takingScreenshot = new WeakSet<Page>()
+async function frame(page: Page) {
+  takingScreenshot.add(page)
+  try { return PNG.sync.read(await page.locator('#stage').screenshot()) }
+  finally { takingScreenshot.delete(page) }
+}
+
+function renderingErrors(page: Page) {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    // Playwright's WebKit screenshot synchronizer inserts a temporary `body {}`
+    // stylesheet. Our CSP correctly blocks it. Exclude only that diagnostic
+    // during capture; keep all page-load and application errors actionable.
+    const screenshotStyle = page.context().browser()?.browserType().name() === 'webkit'
+      && takingScreenshot.has(page)
+      && message.text() === "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy."
+    if (!screenshotStyle) errors.push(message.text())
+  })
+  return errors
+}
 function difference(a: PNG, b: PNG) {
   let changed = 0
   for (let i = 0; i < a.data.length; i += 4) {
@@ -58,9 +79,7 @@ function difference(a: PNG, b: PNG) {
 }
 
 test('water is elapsed-time deterministic, refracts CMY, and settles completely', async ({ page }, testInfo) => {
-  const errors: string[] = []
-  page.on('pageerror', error => errors.push(error.message))
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  const errors = renderingErrors(page)
   await controlled(page)
   const still = await frame(page)
   await page.mouse.click(550, 250)
@@ -124,8 +143,7 @@ test('switching water treatments preserves the next rain event', async ({ page }
 })
 
 test('all review split styles support the smaller Circle ampersand', async ({ page }) => {
-  const errors: string[] = []
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  const errors = renderingErrors(page)
   await controlled(page, { split: 3 })
   await page.mouse.move(1350, 750)
   for (const style of ['1', '2', '3']) {

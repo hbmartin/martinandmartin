@@ -74,8 +74,15 @@ test('opening starts dark, reveals both lines and exposes only CMY at the edge',
   await expect.poll(async () => (await pixels(page)).white, { timeout: 3000 }).toBeGreaterThan(16000)
 })
 
-test('review settings, shortcuts and water look round-trip while legacy shapes always use Circle', async ({ page }) => {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+test('review settings, shortcuts and water look round-trip while legacy shapes always use Circle', async ({ page, browserName }) => {
+  if (browserName === 'chromium') await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  else await page.addInitScript(() => {
+    // Other engines do not expose Chromium's clipboard permission controls.
+    // Exercise the app's manual-copy fallback with a denied clipboard instead.
+    Object.defineProperty(navigator, 'clipboard', { value: {
+      writeText: async () => { throw new DOMException('Clipboard denied', 'NotAllowedError') },
+    } })
+  })
   await page.goto(url({ split: 999, dropMin: 5, dropMax: 2 }, 'triangle'))
   await stage(page)
   await expect(page.getByRole('slider', { name: 'Maximum split' })).toHaveValue('15')
@@ -90,8 +97,10 @@ test('review settings, shortcuts and water look round-trip while legacy shapes a
   await expect(page.locator('#tuning')).toBeHidden()
   await page.keyboard.press('h')
   await page.getByRole('button', { name: 'Copy link' }).click()
-  await expect(page.locator('.tune-status')).toHaveText('Link copied.')
-  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  await expect(page.locator('.tune-status')).toHaveText(browserName === 'chromium'
+    ? 'Link copied.' : 'Select and copy this link:')
+  const copied = browserName === 'chromium' ? await page.evaluate(() => navigator.clipboard.readText())
+    : await page.getByRole('textbox', { name: 'Shareable preview URL' }).inputValue()
   expect(new URL(copied).searchParams.has('shape')).toBe(false)
   await page.goto(copied)
   await expect(page.getByRole('radio', { name: 'Pixel-snapped' })).toBeChecked()
@@ -100,7 +109,7 @@ test('review settings, shortcuts and water look round-trip while legacy shapes a
   await expect(page.getByRole('slider', { name: 'Maximum split' })).toHaveValue('15')
 })
 
-test('touch tap creates a ring; dragging changes the split without a tap and the page stays in bounds', async ({ browser }) => {
+test('touch tap creates a ring; dragging changes the split without a tap and the page stays in bounds', async ({ browser, browserName }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
   try {
     const page = await context.newPage()
@@ -118,11 +127,22 @@ test('touch tap creates a ring; dragging changes the split without a tap and the
     await stage(page)
     await page.getByRole('button', { name: 'Hide', exact: true }).tap()
     await page.waitForTimeout(2900)
-    const client = await context.newCDPSession(page)
-    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 180, y: 335 }] })
-    await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 350, y: 595 }] })
+    const client = browserName === 'chromium' ? await context.newCDPSession(page) : undefined
+    if (client) {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 180, y: 335 }] })
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 350, y: 595 }] })
+    } else {
+      // WebKit has no CDP touch-drag API. The tap above is native; exercise
+      // drag handling with equivalent Pointer Events in this engine.
+      await page.locator('#stage').dispatchEvent('pointerdown', { pointerId: 1, pointerType: 'touch',
+        isPrimary: true, button: 0, clientX: 180, clientY: 335 })
+      await page.locator('#stage').dispatchEvent('pointermove', { pointerId: 1, pointerType: 'touch',
+        isPrimary: true, button: 0, clientX: 350, clientY: 595 })
+    }
     await expect.poll(async () => (await pixels(page)).cyan).toBeGreaterThan(50)
-    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    if (client) await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    else await page.locator('#stage').dispatchEvent('pointerup', { pointerId: 1, pointerType: 'touch',
+      isPrimary: true, button: 0, clientX: 350, clientY: 595 })
     expect(await page.evaluate(() => [scrollX, scrollY])).toEqual([0, 0])
   } finally { await context.close() }
 })
