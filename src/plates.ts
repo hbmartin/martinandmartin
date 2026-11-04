@@ -42,9 +42,8 @@ export function plateOffsets(ctx: PlateContext): Offsets {
 // Keep the span between teaser plates below half a Circle dot's width.
 export function teaserOffsets(ctx: PlateContext, offsets: Offsets, variation = 0): Offsets {
   if (!ctx.teaser) return offsets
-  const strokeEm = .038
   const radius = Math.max(...offsets.map(([x, y]) => Math.hypot(x, y)))
-  const scale = radius > 0 ? Math.min(.4, (strokeEm * ctx.group.block.size * .5) / (2 * radius * (1 + variation))) : 0
+  const scale = radius > 0 ? Math.min(.4, (PIXEL * ctx.group.block.size * .5) / (2 * radius * (1 + variation))) : 0
   return offsets.map(([x, y]) => [x * scale, y * scale]) as unknown as Offsets
 }
 
