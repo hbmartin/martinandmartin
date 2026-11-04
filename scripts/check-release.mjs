@@ -5,8 +5,9 @@ if (!release.approved) {
   console.error('Production deployment is disabled until the preview has been reviewed and a release preset approved.')
   process.exit(1)
 }
-const { style, shape } = release.settings
-if (!['splintered', 'smooth', 'snapped'].includes(style) || shape !== 'random') {
-  console.error('Production must import only the selected split strategy and keep shape selection random.')
+const { style, shape, waterLook } = release.settings
+if (!['splintered', 'smooth', 'snapped'].includes(style) || shape !== 'circle'
+    || !['quiet', 'reflective'].includes(waterLook)) {
+  console.error('Production requires a selected split strategy, Circle type, and a valid water treatment.')
   process.exit(1)
 }

@@ -1,13 +1,11 @@
 import { fit, type Layout } from './layout'
 import { getGL, Renderer, MAX_RINGS, type Ring } from './renderer'
 import type { Strategy } from './plates'
-import { ZERO, clamp, type Settings, type Shape, type Vec } from './settings'
+import { ZERO, clamp, type Settings, type Vec } from './settings'
 
 export interface Controls {
   refresh(): void
   replay(): void
-  setShape(shape: Settings['shape']): Promise<boolean>
-  shape(): Shape
 }
 export type Setup = (controls: Controls) => {
   settings: Readonly<Settings>
@@ -24,9 +22,7 @@ const fade = (time: number, from: number, to: number) => ease((time - from) / (t
 export async function start(setup: Setup) {
   const boot = window.mmBoot
   if (!boot) return
-  let shape = boot.shape
   let family: string | null = null
-  let fontRevision = 0
   let layout: Layout | undefined
   let renderer: Renderer | undefined
   let frame = 0
@@ -40,6 +36,7 @@ export async function start(setup: Setup) {
 
   let clock = 0, previous: number | undefined, introStart = 0, introDuration = 2600
   let openingRain = false, nextDrop = 0
+  let rainMin = 0, rainMax = 0
   const drops: Ring[] = []
   let pointer: Vec = ZERO, mouse: Vec = ZERO, touch: Vec = ZERO
   let touchMode = coarse.matches
@@ -54,7 +51,11 @@ export async function start(setup: Setup) {
       root.style.setProperty('--background', config.settings.background)
       renderer?.invalidate()
       redraw = true
-      if (openingRain) nextDrop = clock + delay()
+      if (rainMin !== config.settings.dropMin || rainMax !== config.settings.dropMax) {
+        rainMin = config.settings.dropMin
+        rainMax = config.settings.dropMax
+        if (openingRain) nextDrop = clock + delay()
+      }
       schedule()
     },
     replay() {
@@ -66,24 +67,10 @@ export async function start(setup: Setup) {
       redraw = true
       schedule()
     },
-    async setShape(requested) {
-      await boot.ready
-      const selected = requested === 'random' ? boot.randomShape() : requested
-      const revision = ++fontRevision
-      try {
-        const loaded = await boot.load(selected)
-        if (revision !== fontRevision) return false
-        shape = selected
-        family = loaded
-        root.style.setProperty('--type', `"${family}"`)
-        root.dataset.font = 'selected'
-        resize()
-        return true
-      } catch { return false }
-    },
-    shape: () => shape,
   })
   const { settings } = config
+  rainMin = settings.dropMin
+  rainMax = settings.dropMax
   root.style.setProperty('--background', settings.background)
 
   function resetRain() {
@@ -93,16 +80,18 @@ export async function start(setup: Setup) {
     driftStart = clock + introDuration
   }
   function delay() { return (settings.dropMin + Math.random() * (settings.dropMax - settings.dropMin)) * 1000 }
-  function addDrop(x: number, y: number) {
-    if (!renderer) return
-    if (drops.length === MAX_RINGS) drops.shift()
-    drops.push({ x, y, born: clock })
+  function addDrop(x: number, y: number, strength = 1.25, radius = .032, born = clock) {
+    if (!renderer || !layout || drops.length === MAX_RINGS) return
+    // Store viewport-relative positions and a radius relative to the short edge.
+    // Resizing preserves the surface instead of restarting or stretching a ring.
+    drops.push({ x: x / layout.width, y: y / layout.height, born, strength, radius })
     redraw = true
   }
-  function randomDrop() {
+  function randomDrop(born: number) {
     if (!layout) return
     const box = Math.random() < .7 ? layout.word.ink : { x: 0, y: 0, width: layout.width, height: layout.height }
-    addDrop(box.x + box.width * Math.random(), box.y + box.height * Math.random())
+    addDrop(box.x + box.width * Math.random(), box.y + box.height * Math.random(),
+      .65 + Math.random() * .2, .026 + Math.random() * .008, born)
   }
   function normalize(x: number, y: number): Vec {
     const rect = canvas.getBoundingClientRect()
@@ -215,14 +204,22 @@ export async function start(setup: Setup) {
     const wordOpacity = fade(progress, 0, 900)
     const teaserOpacity = fade(progress, 1400, 2200)
     const splitOpacity = fade(progress, 2200, 2600)
-    if (progress >= 900 && (!openingRain || clock >= nextDrop)) {
-      randomDrop()
-      openingRain = true
-      nextDrop = clock + delay()
-    }
     const hadRings = drops.length > 0
     for (let i = drops.length - 1; i >= 0; i--) {
       if (clock - drops[i].born >= settings.lifetime * 1000) drops.splice(i, 1)
+    }
+    if (progress >= 900) {
+      if (!openingRain) {
+        openingRain = true
+        nextDrop = introStart + introDuration * 900 / 2600
+      }
+      // Scheduled birth times make rain independent of the display's frame rate.
+      // Bound catch-up work after a long foreground stall.
+      for (let i = 0; clock >= nextDrop && i < MAX_RINGS; i++) {
+        if (clock - nextDrop < settings.lifetime * 1000) randomDrop(nextDrop)
+        nextDrop += delay()
+      }
+      if (clock >= nextDrop) nextDrop = clock + delay()
     }
     let target = mouse
     if (touchMode) {
@@ -237,7 +234,7 @@ export async function start(setup: Setup) {
     const moving = next[0] !== pointer[0] || next[1] !== pointer[1]
     pointer = next
     if (redraw || progress < 2600 || moving || hadRings || drops.length) {
-      renderer.draw(pointer, settings, shape, config.strategy(), wordOpacity, teaserOpacity, clock, drops)
+      renderer.draw(pointer, settings, config.strategy(), wordOpacity, teaserOpacity, clock, drops)
       redraw = progress < 2600
     }
   }
@@ -299,8 +296,7 @@ export async function start(setup: Setup) {
     }
   }
 
-  const original = await boot.ready
-  if (fontRevision === 0) family = original
+  family = await boot.ready
   layout = fit(canvas, family)
   if (!family || reduce.matches || permanentlyStatic) return showStatic(true)
   activate()

@@ -1,10 +1,13 @@
 import { Program, fullVertex, newTexture, texture, type GL } from './gl'
 import { textStyle, type Layout, type TextBlock } from './layout'
 import { aligned, drawOffsets, makeOffsetProgram, type Group, type Strategy } from './plates'
-import type { Settings, Shape, Vec } from './settings'
+import type { Settings, Vec } from './settings'
 
 export const MAX_RINGS = 16
-export interface Ring { x: number; y: number; born: number }
+export interface Ring {
+  /** Viewport fractions; radius is a fraction of the viewport's short edge. */
+  x: number; y: number; born: number; strength: number; radius: number
+}
 
 const water = `#version 300 es
 precision highp float;
@@ -13,15 +16,16 @@ uniform vec4 uWordBox, uTeaserBox;
 uniform vec3 uBackground;
 uniform vec2 uSize, uReveal;
 uniform float uDensity, uShort, uBend, uShimmer, uHighlight, uTeaserStrength;
+uniform float uReflective;
 uniform int uRingCount;
 uniform vec4 uRings[${MAX_RINGS}];
+uniform vec2 uDropParams[${MAX_RINGS}];
 out vec4 outColor;
 
-vec3 coverage(sampler2D plates, vec4 box, vec2 p, vec2 bend, bool warped) {
+vec3 coverage(sampler2D plates, vec4 box, vec2 p, vec2 bend) {
   vec2 uv = (p-box.xy)/box.zw;
   uv.y = 1.-uv.y;
   if (any(lessThan(uv,vec2(0.))) || any(greaterThan(uv,vec2(1.)))) return vec3(0.);
-  if (!warped) return texture(plates, uv).rgb;
   vec2 shift = vec2(bend.x,-bend.y)/box.zw;
   return vec3(texture(plates, uv+shift*(1.+uShimmer)).r,
               texture(plates, uv+shift).g,
@@ -30,32 +34,59 @@ vec3 coverage(sampler2D plates, vec4 box, vec2 p, vec2 bend, bool warped) {
 vec3 screenCMY(vec3 c) {
   return 1. - (1.-c.yzx)*(1.-c.zxy);
 }
+// An asymmetric wave packet: a rounded leading crest and a longer oscillating
+// tail. Return height and its radial derivative, including spreading loss.
+// The softened radius makes the surface differentiable at the drop center.
+vec2 packet(float radius, float age, float width, float speed) {
+  float r = sqrt(radius*radius + width*width*.04);
+  float q = (r-speed*age)/width;
+  float falloff = q > 0. ? 6. : .22;
+  float envelope = exp(-q*q*falloff);
+  float spread = inversesqrt(1.+24.*r);
+  float phase = 6.2831853*q;
+  float h = width/6.2831853*envelope*cos(phase)*spread;
+  float slope = envelope*spread*(-sin(phase)-2.*q*falloff/6.2831853*cos(phase));
+  slope -= h*12./(1.+24.*r);
+  return vec2(h, slope*radius/r);
+}
+// A broad studio light reflected in the surface. Subtract its flat-surface
+// value below so undisturbed water retains the chosen background exactly.
+float reflection(vec3 normal) {
+  vec3 reflected = reflect(vec3(0.,0.,-1.), normal);
+  vec3 light = normalize(vec3(-.45,-.65,1.));
+  float facing = max(0.,dot(reflected,light));
+  return pow(facing,mix(28.,9.,uReflective));
+}
 void main() {
   vec2 p = vec2(gl_FragCoord.x,uSize.y-gl_FragCoord.y)/uDensity;
-  vec2 bend = vec2(0.);
-  float light = 0.;
-  float halfBand = max(2.,uShort*.018);
+  vec2 gradient = vec2(0.);
+  float height = 0.;
   for (int i=0; i<${MAX_RINGS}; i++) {
     if (i>=uRingCount) break;
     vec4 ring = uRings[i];
-    vec2 d = p-ring.xy;
-    float radius = ring.z * uShort * .29;
-    if (max(abs(d.x),abs(d.y)) > radius+halfBand*2.) continue;
-    float distance = length(d);
-    float f = (distance-radius)/halfBand;
-    if (abs(f)>2.) continue;
-    float fade = smoothstep(0.,.10,ring.z) * (1.-smoothstep(.15,1.,ring.w));
-    float envelope = 1.-smoothstep(.65,2.,abs(f));
-    float slope = cos(f*2.9)*envelope*fade;
-    bend += d/max(distance,1.) * slope;
-    light = max(light,exp(-f*f*7.)*fade);
+    vec2 d = (p-ring.xy)/uShort;
+    float width = uDropParams[i].y;
+    // Both packets are negligible beyond this bound; no visible hard edge.
+    if (max(abs(d.x),abs(d.y)) > ring.z*.235+width*2.) continue;
+    float radius = length(d);
+    float fade = smoothstep(0.,.12,ring.z)*exp(-ring.z*.38)
+      *(1.-smoothstep(.65,1.,ring.w))*uDropParams[i].x;
+    vec2 wave = packet(radius,ring.z,width,.19)
+      + .18*packet(radius,ring.z,width*.55,.235);
+    height += wave.x*fade;
+    gradient += d/max(radius,.00001)*wave.y*fade;
   }
-  bool warped = any(notEqual(bend,vec2(0.)));
-  float magnitude = length(bend);
-  bend *= uBend / max(1.,magnitude);
-  vec3 word = screenCMY(coverage(uWord, uWordBox, p, bend, warped)) * uReveal.x;
-  vec3 teaser = screenCMY(coverage(uTeaser, uTeaserBox, p, bend*uTeaserStrength, warped)) * uReveal.y;
-  vec3 color = 1.-(1.-uBackground)*(1.-word)*(1.-teaser)*(1.-light*uHighlight);
+  // Limit only the combined slope, smoothly, preserving wave cancellation.
+  vec2 slope = gradient/sqrt(1.+dot(gradient,gradient));
+  vec2 bend = slope*uBend;
+  vec3 word = screenCMY(coverage(uWord,uWordBox,p,bend))*uReveal.x;
+  vec3 teaser = screenCMY(coverage(uTeaser,uTeaserBox,p,bend*uTeaserStrength))*uReveal.y;
+  vec3 normal = normalize(vec3(-slope*1.8,1.));
+  float reflected = reflection(normal)-reflection(vec3(0.,0.,1.));
+  float light = reflected*uHighlight*mix(.8,2.4,uReflective);
+  float shade = clamp(dot(slope,vec2(.45,.65))*.24 + height*5.,-.18,.18);
+  vec3 ground = max(vec3(0.),uBackground*(1.-shade)+vec3(light));
+  vec3 color = 1.-(1.-ground)*(1.-word)*(1.-teaser);
   outColor = vec4(color, 1.);
 }`
 
@@ -74,6 +105,7 @@ export class Renderer {
   private lastX = NaN
   private lastY = NaN
   private rings = new Float32Array(MAX_RINGS * 4)
+  private dropParams = new Float32Array(MAX_RINGS * 2)
   private textureLimit: number
 
   constructor(private canvas: HTMLCanvasElement, private gl: GL) {
@@ -112,8 +144,10 @@ export class Renderer {
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!
     ctx.setTransform(density, 0, 0, density, 0, 0)
     ctx.fillStyle = 'white'
-    textStyle(ctx, block.font, block.size)
-    for (const line of block.lines) ctx.fillText(line.text, line.x - box.x, line.y - box.y)
+    for (const line of block.lines) {
+      textStyle(ctx, block.font, line.size)
+      ctx.fillText(line.text, line.x - box.x, line.y - box.y)
+    }
     const mask = newTexture(gl)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas)
     const coverage = newTexture(gl)
@@ -160,7 +194,7 @@ export class Renderer {
     return program
   }
 
-  draw(pointer: Vec, settings: Readonly<Settings>, shape: Shape, strategy: Strategy,
+  draw(pointer: Vec, settings: Readonly<Settings>, strategy: Strategy,
     wordOpacity: number, teaserOpacity: number, now: number, drops: readonly Ring[]) {
     const gl = this.gl
     const { layout, density, canvas } = this
@@ -170,7 +204,7 @@ export class Renderer {
         gl.viewport(0, 0, group.canvas.width, group.canvas.height)
         const draw = (offsets: Parameters<typeof drawOffsets>[4]) => drawOffsets(gl, this.offset, group, density, offsets)
         if (settings.split === 0 || (pointer[0] === 0 && pointer[1] === 0)) draw(aligned)
-        else strategy.draw({ gl, group, density, teaser: i === 1, pointer, settings, shape,
+        else strategy.draw({ gl, group, density, teaser: i === 1, pointer, settings,
           lineHeight: layout.lineHeight, wordSize: layout.word.size, drawOffsets: draw, program: this.program })
       })
       this.lastX = pointer[0]
@@ -198,12 +232,17 @@ export class Renderer {
     program.f('uShimmer', settings.shimmer / 100)
     program.f('uHighlight', settings.highlight / 100)
     program.f('uTeaserStrength', settings.teaserRipple / 100)
-    drops.forEach(({ x, y, born }, i) => {
+    program.f('uReflective', settings.waterLook === 'reflective' ? 1 : 0)
+    drops.forEach(({ x, y, born, strength, radius }, i) => {
       const age = Math.max(0, (now - born) / 1000)
-      this.rings.set([x, y, age, age / settings.lifetime], i * 4)
+      this.rings.set([x * layout.width, y * layout.height, age, age / settings.lifetime], i * 4)
+      this.dropParams.set([strength, radius], i * 2)
     })
     program.i('uRingCount', drops.length)
-    if (drops.length) gl.uniform4fv(program.uniform('uRings[0]'), this.rings, 0, drops.length * 4)
+    if (drops.length) {
+      gl.uniform4fv(program.uniform('uRings[0]'), this.rings, 0, drops.length * 4)
+      gl.uniform2fv(program.uniform('uDropParams[0]'), this.dropParams, 0, drops.length * 2)
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3)
   }
 }

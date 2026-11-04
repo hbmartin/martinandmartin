@@ -2,6 +2,7 @@ import { phoneLayout, teaserWords } from './settings'
 
 export interface Line {
   text: string
+  size: number
   x: number
   y: number
   advance: number
@@ -41,11 +42,13 @@ const inkWidth = (m: TextMetrics) => m.actualBoundingBoxLeft + m.actualBoundingB
 const widthOf = (lines: readonly string[]) => Math.max(...lines.map(t => inkWidth(metrics(t))))
 const baseline = (element: Element) => element.querySelector('i')!.getBoundingClientRect().top
 
-function block(lines: readonly string[], baselines: number[], font: string, size: number, center: number): TextBlock {
-  textStyle(scratch, font, size)
+function block(lines: readonly string[], baselines: number[], font: string, size: number, center: number,
+  scales: readonly number[] = []): TextBlock {
   const shaped = lines.map((text, i): Line => {
+    const lineSize = size * (scales[i] ?? 1)
+    textStyle(scratch, font, lineSize)
     const m = metrics(text)
-    return { text, x: center + (m.actualBoundingBoxLeft - m.actualBoundingBoxRight) / 2, y: baselines[i],
+    return { text, size: lineSize, x: center + (m.actualBoundingBoxLeft - m.actualBoundingBoxRight) / 2, y: baselines[i],
       advance: m.width, left: m.actualBoundingBoxLeft, right: m.actualBoundingBoxRight,
       ascent: m.actualBoundingBoxAscent, descent: m.actualBoundingBoxDescent }
   })
@@ -70,7 +73,7 @@ export function fit(canvas: HTMLCanvasElement, family: string | null): Layout {
   const wordEm = widthOf(wordText) / 1000
   const teaserEm = widthOf(teaserText) / 1000
   const ratio = wordEm / teaserEm
-  const wordSize = Math.min(limitWidth / wordEm, limitHeight / (3 * .95 + .16 + teaserText.length * ratio * 1.14))
+  const wordSize = Math.min(limitWidth / wordEm, limitHeight / (3 * .95 + .24 + teaserText.length * ratio * 1.14))
   const teaserSize = wordSize * ratio
   const lineHeight = wordSize * .95
   title.style.setProperty('--word-size', `${wordSize}px`)
@@ -78,7 +81,7 @@ export function fit(canvas: HTMLCanvasElement, family: string | null): Layout {
   title.style.transform = ''
   const wordBaselines = wordSpans.map(baseline)
   const teaserBaselines = isMobile ? teaserSpans.map(baseline) : [baseline(teaserSpans[1])]
-  const word = block(wordText, wordBaselines, font, wordSize, center)
+  const word = block(wordText, wordBaselines, font, wordSize, center, [1, .9, 1])
   const teaser = block(teaserText, teaserBaselines, font, teaserSize, center)
   const top = word.ink.y
   const bottom = teaser.ink.y + teaser.ink.height

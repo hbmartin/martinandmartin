@@ -1,6 +1,6 @@
 import './review.css'
 import type { Controls, Setup } from './app'
-import { defaults, shapes, clamp, type Shape, type Settings, type Style } from './settings'
+import { defaults, clamp, type Settings, type Style, type WaterLook } from './settings'
 import { smooth } from './split/smooth'
 import { snapped } from './split/snapped'
 import { splintered } from './split/splintered'
@@ -8,6 +8,7 @@ import { splintered } from './split/splintered'
 const strategies = { splintered, smooth, snapped }
 const styles = Object.keys(strategies) as Style[]
 const styleNames: Record<Style, string> = { splintered: 'Splintered cells', smooth: 'Smooth slide', snapped: 'Pixel-snapped' }
+const waterNames: Record<WaterLook, string> = { quiet: 'Quiet Black Pool', reflective: 'Reflective Liquid' }
 type NumberKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings]
 type Range = readonly [NumberKey, string, number, number, number, string]
 const sections: readonly [string, Range[]][] = [
@@ -23,10 +24,10 @@ const sections: readonly [string, Range[]][] = [
   ['Rain', [
     ['dropMin', 'Time between drops · min', .25, 6, .05, ' s'],
     ['dropMax', 'Time between drops · max', .25, 6, .05, ' s'],
-    ['lifetime', 'Ring lifetime', 1, 5, .1, ' s'],
+    ['lifetime', 'Wave lifetime', 1, 5, .1, ' s'],
     ['bend', 'Text bend at crest', 0, 5, .1, '%'],
-    ['shimmer', 'Ripple shimmer', 0, 50, 1, '%'],
-    ['highlight', 'Ring highlight', 0, 25, 1, '%'],
+    ['shimmer', 'CMY refraction', 0, 50, 1, '%'],
+    ['highlight', 'Surface reflections', 0, 25, 1, '%'],
     ['teaserRipple', 'Teaser ripple strength', 0, 100, 1, '%'],
   ]],
 ]
@@ -34,11 +35,10 @@ const sections: readonly [string, Range[]][] = [
 function fromURL(params: URLSearchParams): Settings {
   const settings = { ...defaults }
   if (!params.has('tune') || params.get('v') !== '1') return settings
-  const shape = params.get('shape') as Shape
-  if (shapes.includes(shape)) settings.shape = shape
   let saved: Partial<Settings>
   try { saved = JSON.parse(params.get('settings') ?? '{}') ?? {} } catch { return settings }
   if (styles.includes(saved.style as Style)) settings.style = saved.style!
+  if (saved.waterLook === 'quiet' || saved.waterLook === 'reflective') settings.waterLook = saved.waterLook
   if (typeof saved.background === 'string' && /^#[0-9a-f]{6}$/i.test(saved.background)) settings.background = saved.background
   for (const [, ranges] of sections) for (const [key, , min, max] of ranges) {
     const value = saved[key]
@@ -97,21 +97,10 @@ function panel(settings: Settings, api: Controls) {
     api.refresh()
   }
   const styleChoice = choice('Split style', styles, s => styleNames[s], settings.style, style)
-  let shapeChange = 0
-  const shapeChoice = choice<Settings['shape']>('Pixel shape', ['random', ...shapes],
-    s => s === 'random' ? `Random (${api.shape()})` : s[0].toUpperCase() + s.slice(1), settings.shape,
-    async requested => {
-      const change = ++shapeChange
-      const success = await api.setShape(requested)
-      if (change !== shapeChange) return
-      if (success) {
-        settings.shape = requested
-        shapeChoice.get('random')!.caption.textContent = `Random (${api.shape()})`
-        status.textContent = ''
-      } else {
-        shapeChoice.get(settings.shape)!.input.checked = true
-        status.textContent = 'Font could not be loaded.'
-      }
+  choice<WaterLook>('Water surface', ['quiet', 'reflective'], s => waterNames[s], settings.waterLook,
+    value => {
+      settings.waterLook = value
+      api.refresh()
     })
 
   const sync = new Map<NumberKey, () => void>()
@@ -173,7 +162,6 @@ function panel(settings: Settings, api: Controls) {
     url.hash = ''
     url.searchParams.set('tune', '')
     url.searchParams.set('v', '1')
-    url.searchParams.set('shape', api.shape())
     const { shape: _shape, ...values } = settings
     url.searchParams.set('settings', JSON.stringify(values))
     try {
