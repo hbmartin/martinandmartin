@@ -83,9 +83,10 @@ test('review settings, shortcuts and water look round-trip while legacy shapes a
       writeText: async () => { throw new DOMException('Clipboard denied', 'NotAllowedError') },
     } })
   })
-  await page.goto(url({ split: 999, dropMin: 5, dropMax: 2 }, 'triangle'))
+  await page.goto(url({ split: 999, lag: 80, dropMin: 5, dropMax: 2 }, 'triangle'))
   await stage(page)
   await expect(page.getByRole('slider', { name: 'Maximum split' })).toHaveValue('15')
+  await expect(page.getByRole('slider', { name: 'Cursor lag' })).toHaveValue('80')
   await expect(page.getByRole('slider', { name: 'Time between drops · max' })).toHaveValue('5')
   await page.keyboard.press('3')
   await expect(page.getByRole('radio', { name: 'Pixel-snapped' })).toBeChecked()
@@ -107,6 +108,22 @@ test('review settings, shortcuts and water look round-trip while legacy shapes a
   await expect(page.getByRole('radio', { name: 'Reflective Liquid' })).toBeChecked()
   await expect(page.locator('html')).toHaveCSS('--type', '"Geist Pixel circle"')
   await expect(page.getByRole('slider', { name: 'Maximum split' })).toHaveValue('15')
+  await expect(page.getByRole('slider', { name: 'Cursor lag' })).toHaveValue('80')
+})
+
+test('both builds serve the scalable favicon and multi-size fallback with image MIME types', async ({ page, request }) => {
+  for (const port of [4173, 4174]) {
+    const origin = `http://127.0.0.1:${port}`
+    await page.goto(origin)
+    await expect(page.locator('link[rel=icon][type="image/svg+xml"]')).toHaveAttribute('href', '/favicon.svg')
+    await expect(page.locator('link[rel=icon][type="image/x-icon"]')).toHaveAttribute('sizes', '16x16 32x32 48x48')
+    for (const [asset, type] of [['favicon.svg', 'image/svg+xml'], ['favicon.ico', 'image/x-icon']]) {
+      const response = await request.get(`${origin}/${asset}`)
+      expect(response.ok()).toBe(true)
+      expect(response.headers()['content-type']).toContain(type)
+      expect((await response.body()).byteLength).toBeGreaterThan(100)
+    }
+  }
 })
 
 test('touch tap creates a ring; dragging changes the split without a tap and the page stays in bounds', async ({ browser, browserName }) => {

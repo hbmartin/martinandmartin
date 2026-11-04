@@ -63,7 +63,7 @@ export async function start(setup: Setup) {
       introStart = clock
       introDuration = 2600
       resetRain()
-      pointer = ZERO
+      if (touchMode) pointer = ZERO
       redraw = true
       schedule()
     },
@@ -203,7 +203,8 @@ export async function start(setup: Setup) {
     const progress = (clock - introStart) * 2600 / introDuration
     const wordOpacity = fade(progress, 0, 900)
     const teaserOpacity = fade(progress, 1400, 2200)
-    const splitOpacity = fade(progress, 2200, 2600)
+    // Mouse interaction is live throughout the reveal; retain the touch entrance.
+    const splitOpacity = touchMode ? fade(progress, 2200, 2600) : 1
     const hadRings = drops.length > 0
     for (let i = drops.length - 1; i >= 0; i--) {
       if (clock - drops[i].born >= settings.lifetime * 1000) drops.splice(i, 1)
@@ -285,6 +286,9 @@ export async function start(setup: Setup) {
         introDuration = Math.min(2600, 2965 - (performance.now() - boot.start))
         if (introDuration <= 50 || root.dataset.view !== 'pending') return showStatic(true)
         resetRain()
+        // Pointer listeners are installed before awaiting the font. Honor any
+        // mouse position received during that wait on the first rendered frame.
+        if (!touchMode) pointer = mouse
       }
       redraw = true
       render(0)

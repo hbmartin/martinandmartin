@@ -3,7 +3,7 @@ import { PNG } from 'pngjs'
 
 // Drive the real built renderer at exact times without a test API in the app.
 // The shader, drop scheduler, input handling and compositing all run unchanged.
-async function controlled(page: Page, settings: object = {}) {
+async function installClock(page: Page) {
   await page.addInitScript(() => {
     let seed = 17, timestamp = 0, id = 0
     const callbacks = new Map<number, FrameRequestCallback>()
@@ -24,6 +24,10 @@ async function controlled(page: Page, settings: object = {}) {
       }
     } })
   })
+}
+
+async function controlled(page: Page, settings: object = {}) {
+  await installClock(page)
   await page.goto('/?' + new URLSearchParams({ tune: '', v: '1', shape: 'line', settings: JSON.stringify({
     split: 0, lag: 0, dropMin: 6, dropMax: 6, lifetime: 1, ...settings,
   }) }))
@@ -77,6 +81,109 @@ function difference(a: PNG, b: PNG) {
   }
   return changed
 }
+
+function coloredPixels(image: PNG) {
+  let count = 0
+  for (let i = 0; i < image.data.length; i += 4) {
+    const rgb = [...image.data.subarray(i, i + 3)]
+    if (Math.max(...rgb) - Math.min(...rgb) > 25) count++
+  }
+  return count
+}
+
+const stillWater = { bend: 0, shimmer: 0, highlight: 0, dropMin: 6, dropMax: 6, lifetime: 1 }
+const openingURL = '/?' + new URLSearchParams({ tune: '', v: '1', settings: JSON.stringify(stillWater) })
+
+for (const build of ['review', 'production']) {
+  test(`${build} responds to the mouse within the first second of the opening`, async ({ page }, testInfo) => {
+    const errors = renderingErrors(page)
+    await installClock(page)
+    await page.goto(build === 'review' ? openingURL : 'http://127.0.0.1:4174/')
+    await expect(page.locator('html')).toHaveAttribute('data-view', 'canvas')
+    if (build === 'review') {
+      await expect(page.getByRole('slider', { name: 'Maximum split' })).toHaveValue('4.5')
+      await expect(page.getByRole('slider', { name: 'Cursor lag' })).toHaveValue('250')
+      await page.getByRole('button', { name: 'Hide', exact: true }).click()
+    }
+    await advance(page, 16)
+    await page.mouse.move(100, 730)
+    await advance(page, 750)
+    const opening = await frame(page)
+    expect(coloredPixels(opening)).toBeGreaterThan(150)
+    await testInfo.attach(`${build}-opening-cmy`, { body: PNG.sync.write(opening), contentType: 'image/png' })
+    if (build === 'review') {
+      await page.mouse.move(720, 450)
+      await advance(page, 2200)
+      expect(coloredPixels(await frame(page))).toBe(0)
+      await page.mouse.move(100, 730)
+      await advance(page, 750)
+      expect(coloredPixels(await frame(page))).toBeGreaterThan(150)
+      await page.evaluate(() => document.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse' })))
+      await advance(page, 2200)
+      expect(coloredPixels(await frame(page))).toBe(0)
+    }
+    expect(errors).toEqual([])
+  })
+}
+
+test('font-pending mouse input initializes the follow position and opening replay preserves it', async ({ page }) => {
+  await installClock(page)
+  // Hold the startup budget steady while the font is gated; RAF time still
+  // advances explicitly, and the font timeout remains a real browser timer.
+  await page.addInitScript(() => { performance.now = () => 0 })
+  let releaseFont!: () => void
+  const fontGate = new Promise<void>(resolve => { releaseFont = resolve })
+  await page.route('**/*.woff2', async route => { await fontGate; await route.continue() })
+  await page.goto(openingURL, { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('button', { name: 'Replay opening' })).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('data-view', 'pending')
+  await page.mouse.move(220, 750)
+  await page.mouse.move(100, 730)
+  releaseFont()
+  await expect(page.locator('html')).toHaveAttribute('data-view', 'canvas')
+  await page.getByRole('button', { name: 'Hide', exact: true }).click()
+  await advance(page, 16)
+  await advance(page, 320)
+  const opening = await frame(page)
+  expect(coloredPixels(opening)).toBeGreaterThan(150)
+
+  const setLag = async (value: string) => {
+    await page.keyboard.press('h')
+    await page.getByRole('slider', { name: 'Cursor lag' }).fill(value)
+    await page.getByRole('button', { name: 'Hide', exact: true }).click()
+    await advance(page, 0)
+  }
+  // With buffered input initialized at its latest position, removing smoothing
+  // cannot change the frame. A follow position starting at zero would jump.
+  await setLag('0')
+  expect(difference(opening, await frame(page))).toBe(0)
+  await setLag('250')
+  await page.keyboard.press('h')
+  await page.getByRole('button', { name: 'Replay opening' }).click()
+  await page.getByRole('button', { name: 'Hide', exact: true }).click()
+  await advance(page, 320)
+  expect(difference(opening, await frame(page))).toBe(0)
+  await setLag('0')
+  await page.mouse.move(1320, 730)
+  await advance(page, 0)
+  expect(difference(opening, await frame(page))).toBeGreaterThan(150)
+})
+
+test('touch retains its gradual CMY entrance', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
+  try {
+    const page = await context.newPage()
+    await installClock(page)
+    await page.goto('http://127.0.0.1:4173' + openingURL)
+    await expect(page.locator('html')).toHaveAttribute('data-view', 'canvas')
+    await page.getByRole('button', { name: 'Hide', exact: true }).tap()
+    await advance(page, 16)
+    await advance(page, 750)
+    expect(coloredPixels(await frame(page))).toBe(0)
+    await advance(page, 3200)
+    expect(coloredPixels(await frame(page))).toBeGreaterThan(25)
+  } finally { await context.close() }
+})
 
 test('water is elapsed-time deterministic, refracts CMY, and settles completely', async ({ page }, testInfo) => {
   const errors = renderingErrors(page)

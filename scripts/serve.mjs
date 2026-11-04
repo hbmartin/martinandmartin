@@ -6,7 +6,7 @@ const contentTypes = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2',
   '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8',
-  '.xml': 'application/xml',
+  '.xml': 'application/xml', '.ico': 'image/x-icon',
 }
 
 async function serve(folder, port) {
