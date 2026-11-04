@@ -1,0 +1,44 @@
+#tuning {
+  box-sizing: border-box;
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 2;
+  width: min(320px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y pinch-zoom;
+  padding: 14px;
+  border: 1px solid #454545;
+  border-radius: 10px;
+  background: #151515;
+  color: #f4f4f4;
+  font: 13px/1.35 system-ui, sans-serif;
+}
+#tuning[hidden] { display: none; }
+#tuning header, #tuning > label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#tuning h2 { margin: 0; font-size: 16px; }
+#tuning .tune-detail { margin: 4px 0 12px; font-size: 11px; color: #c5c5c5; }
+#tuning > label { margin: 8px 0; }
+#tuning fieldset { border: 0; border-top: 1px solid #424242; margin: 12px 0 0; padding: 6px 0 0; min-width: 0; }
+#tuning legend { padding-right: 6px; font-weight: 650; }
+#tuning .tune-range { display: grid; grid-template-columns: 1fr auto; gap: 0 5px; margin-bottom: 4px; }
+#tuning input[type="range"] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: #eee; }
+#tuning output { font-variant-numeric: tabular-nums; color: #ccc; }
+#tuning button, #tuning .tune-choices span, #tuning input[readonly] {
+  border: 1px solid #666; border-radius: 5px; background: #242424; color: inherit; padding: 5px 7px; font: inherit;
+}
+#tuning button, #tuning .tune-choices label { cursor: pointer; }
+#tuning .tune-choices { display: flex; flex-wrap: wrap; gap: 4px; }
+#tuning .tune-choices label { position: relative; }
+#tuning .tune-choices input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+#tuning .tune-choices span { display: block; font-size: 11px; }
+#tuning .tune-choices input:checked + span { background: #e7e7e7; border-color: #e7e7e7; color: #151515; }
+#tuning .tune-choices input:focus-visible + span { outline: 2px solid #fff; outline-offset: 2px; }
+#tuning .tune-actions { display: flex; gap: 8px; margin-top: 12px; }
+#tuning .tune-status { margin-top: 5px; color: #d7d7d7; }
+#tuning input[readonly] { box-sizing: border-box; width: 100%; }
+@media (max-width: 600px), (pointer: coarse) and (max-height: 600px) {
+  #tuning { top: auto; bottom: max(8px, env(safe-area-inset-bottom)); max-height: 46dvh; }
+}

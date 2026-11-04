@@ -1,0 +1,24 @@
+{
+  "name": "martin-and-martin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --mode review",
+    "build": "vite build",
+    "build:review": "vite build --mode review",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "check:dist": "node scripts/check-dist.mjs",
+    "deploy:review": "npm run build:review && wrangler deploy --config wrangler.review.jsonc",
+    "deploy:production": "node scripts/check-release.mjs && npm run build && npm run check:dist && wrangler deploy --config wrangler.jsonc"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.12.0",
+    "@types/pngjs": "6.0.5",
+    "pngjs": "7.0.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  }
+}

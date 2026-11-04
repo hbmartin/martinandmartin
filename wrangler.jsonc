@@ -1,0 +1,8 @@
+{
+  "name": "martin-and-martin",
+  "compatibility_date": "2026-11-04",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "martinandmartin.tech", "custom_domain": true }],
+  "assets": { "directory": "./dist" }
+}

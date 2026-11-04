@@ -1,0 +1,7 @@
+{
+  "name": "martin-and-martin-review",
+  "compatibility_date": "2026-11-04",
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": { "directory": "./dist-review" }
+}

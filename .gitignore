@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-review/
+.wrangler/
+test-results/
+playwright-report/
+.DS_Store
+
+# Local environment and Wrangler secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
