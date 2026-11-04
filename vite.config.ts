@@ -17,15 +17,10 @@ const meta = `<link rel="canonical" href="${origin}/">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="Martin &amp; Martin in white pixel type with subtle cyan, magenta and yellow edges.">
     <meta name="twitter:card" content="summary_large_image">`
-const reviewOverride = `const params = new URLSearchParams(location.search);
-  const requested = params.get('shape');
-  if (params.has('tune') && params.get('v') === '1' && shapes.includes(requested)) shape = requested;`
-
 export default defineConfig(({ mode }) => {
   const review = mode === 'review'
   const boot = readFileSync(path('./src/bootstrap.js'), 'utf8').trim()
     .replace('/*FONTS*/ {}', JSON.stringify(fonts))
-    .replace('/*SHAPE_OVERRIDE*/', review ? reviewOverride : '')
   return {
     build: {
       outDir: review ? 'dist-review' : 'dist',
@@ -46,7 +41,7 @@ export default defineConfig(({ mode }) => {
           if (!['splintered', 'smooth', 'snapped'].includes(style)) this.error('Invalid production split style')
           return `export { ${style} as productionStrategy } from '/src/split/${style}.ts'`
         }
-        if (id === '\0landing-font.css') return `@font-face{font-family:"Static Square";src:url("${fonts.square}") format("woff2");font-display:block}`
+        if (id === '\0landing-font.css') return `@font-face{font-family:"Static Circle";src:url("${fonts.circle}") format("woff2");font-display:block}`
       },
       transformIndexHtml: {
         order: 'pre',

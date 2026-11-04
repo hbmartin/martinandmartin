@@ -1,7 +1,3 @@
 {
-  "square": "/assets/geist-pixel-square-51404d6bdd0b.woff2",
-  "circle": "/assets/geist-pixel-circle-c02306a599e9.woff2",
-  "grid": "/assets/geist-pixel-grid-d7a9bad2b6b8.woff2",
-  "triangle": "/assets/geist-pixel-triangle-d5fe6ad8c059.woff2",
-  "line": "/assets/geist-pixel-line-771bcd1af4cb.woff2"
+  "circle": "/assets/geist-pixel-circle-c02306a599e9.woff2"
 }

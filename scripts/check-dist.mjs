@@ -15,9 +15,11 @@ const inline = html.toString().match(/<script id="font-bootstrap">([\s\S]*?)<\/s
 assert(inline)
 const hash = createHash('sha256').update(inline).digest('base64')
 assert(read('_headers').includes(`'sha256-${hash}'`))
-assert.equal(fonts.length, 5)
+assert.equal(fonts.length, 1)
+assert(assets.filter(name => name.endsWith('.woff2')).every(name => name.startsWith('geist-pixel-circle-')))
 const script = js.map(String).join('') + inline
 assert(!/Copy link|Motion tuning|URLSearchParams|tune-range/.test(script + css.map(String).join('')))
+assert(!/randomShape|geist-pixel-(square|grid|triangle|line)-/.test(script + css.map(String).join('')))
 const release = JSON.parse(readFileSync(new URL('../src/release.json', import.meta.url), 'utf8'))
 assert.equal(script.includes('drawArraysInstanced'), release.settings.style === 'splintered')
 const jsSize = js.reduce((sum, b) => sum + gz(b), gz(Buffer.from(inline)))

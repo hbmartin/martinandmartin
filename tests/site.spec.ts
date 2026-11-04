@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { PNG } from 'pngjs'
 
 const qa = { dropMin: 6, dropMax: 6, lifetime: 1, bend: 0, shimmer: 0, highlight: 0, lag: 0 }
-function url(settings: object = {}, shape = 'square') {
+function url(settings: object = {}, shape = 'circle') {
   return '/?' + new URLSearchParams({ tune: '', v: '1', shape, settings: JSON.stringify({ ...qa, ...settings }) })
 }
 async function stage(page: Page) {
@@ -38,6 +38,7 @@ test('clean review preview loads a single font with a valid CSP and no external 
   await expect(page.locator('main p')).toHaveText('Coming soon to a supply chain near you.')
   await expect(page.locator('#tuning')).toHaveCount(0)
   expect(requests.filter(request => request.endsWith('.woff2'))).toHaveLength(1)
+  expect(requests.find(request => request.endsWith('.woff2'))).toContain('geist-pixel-circle-')
   expect(requests.every(request => request.startsWith('http://127.0.0.1:4173/'))).toBe(true)
   expect(await context.cookies()).toEqual([])
   expect(errors).toEqual([])
@@ -73,29 +74,42 @@ test('opening starts dark, reveals both lines and exposes only CMY at the edge',
   await expect.poll(async () => (await pixels(page)).white, { timeout: 3000 }).toBeGreaterThan(16000)
 })
 
-test('review settings, shortcuts and resolved font round-trip through a copied URL', async ({ page }) => {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+test('review settings, shortcuts and water look round-trip while legacy shapes always use Circle', async ({ page, browserName }) => {
+  if (browserName === 'chromium') await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  else await page.addInitScript(() => {
+    // Other engines do not expose Chromium's clipboard permission controls.
+    // Exercise the app's manual-copy fallback with a denied clipboard instead.
+    Object.defineProperty(navigator, 'clipboard', { value: {
+      writeText: async () => { throw new DOMException('Clipboard denied', 'NotAllowedError') },
+    } })
+  })
   await page.goto(url({ split: 999, dropMin: 5, dropMax: 2 }, 'triangle'))
   await stage(page)
   await expect(page.getByRole('slider', { name: 'Maximum split' })).toHaveValue('15')
   await expect(page.getByRole('slider', { name: 'Time between drops · max' })).toHaveValue('5')
   await page.keyboard.press('3')
   await expect(page.getByRole('radio', { name: 'Pixel-snapped' })).toBeChecked()
-  await page.getByText('Line', { exact: true }).click()
-  await expect(page.locator('html')).toHaveCSS('--type', '"Geist Pixel line"')
+  await expect(page.locator('html')).toHaveCSS('--type', '"Geist Pixel circle"')
+  await expect(page.getByRole('group', { name: 'Pixel shape' })).toHaveCount(0)
+  await expect(page.getByRole('radio', { name: 'Quiet Black Pool' })).toBeChecked()
+  await page.getByRole('radio', { name: 'Reflective Liquid' }).check()
   await page.keyboard.press('h')
   await expect(page.locator('#tuning')).toBeHidden()
   await page.keyboard.press('h')
   await page.getByRole('button', { name: 'Copy link' }).click()
-  await expect(page.locator('.tune-status')).toHaveText('Link copied.')
-  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  await expect(page.locator('.tune-status')).toHaveText(browserName === 'chromium'
+    ? 'Link copied.' : 'Select and copy this link:')
+  const copied = browserName === 'chromium' ? await page.evaluate(() => navigator.clipboard.readText())
+    : await page.getByRole('textbox', { name: 'Shareable preview URL' }).inputValue()
+  expect(new URL(copied).searchParams.has('shape')).toBe(false)
   await page.goto(copied)
   await expect(page.getByRole('radio', { name: 'Pixel-snapped' })).toBeChecked()
-  await expect(page.getByRole('radio', { name: 'Line', exact: true })).toBeChecked()
+  await expect(page.getByRole('radio', { name: 'Reflective Liquid' })).toBeChecked()
+  await expect(page.locator('html')).toHaveCSS('--type', '"Geist Pixel circle"')
   await expect(page.getByRole('slider', { name: 'Maximum split' })).toHaveValue('15')
 })
 
-test('touch tap creates a ring; dragging changes the split without a tap and the page stays in bounds', async ({ browser }) => {
+test('touch tap creates a ring; dragging changes the split without a tap and the page stays in bounds', async ({ browser, browserName }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
   try {
     const page = await context.newPage()
@@ -113,11 +127,22 @@ test('touch tap creates a ring; dragging changes the split without a tap and the
     await stage(page)
     await page.getByRole('button', { name: 'Hide', exact: true }).tap()
     await page.waitForTimeout(2900)
-    const client = await context.newCDPSession(page)
-    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 180, y: 335 }] })
-    await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 350, y: 595 }] })
+    const client = browserName === 'chromium' ? await context.newCDPSession(page) : undefined
+    if (client) {
+      await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 180, y: 335 }] })
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 350, y: 595 }] })
+    } else {
+      // WebKit has no CDP touch-drag API. The tap above is native; exercise
+      // drag handling with equivalent Pointer Events in this engine.
+      await page.locator('#stage').dispatchEvent('pointerdown', { pointerId: 1, pointerType: 'touch',
+        isPrimary: true, button: 0, clientX: 180, clientY: 335 })
+      await page.locator('#stage').dispatchEvent('pointermove', { pointerId: 1, pointerType: 'touch',
+        isPrimary: true, button: 0, clientX: 350, clientY: 595 })
+    }
     await expect.poll(async () => (await pixels(page)).cyan).toBeGreaterThan(50)
-    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    if (client) await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    else await page.locator('#stage').dispatchEvent('pointerup', { pointerId: 1, pointerType: 'touch',
+      isPrimary: true, button: 0, clientX: 350, clientY: 595 })
     expect(await page.evaluate(() => [scrollX, scrollY])).toEqual([0, 0])
   } finally { await context.close() }
 })
@@ -125,11 +150,17 @@ test('touch tap creates a ring; dragging changes the split without a tap and the
 test('production ignores tuning parameters, preserves fallback HTML and serves launch metadata', async ({ browser }) => {
   const context = await browser.newContext({ reducedMotion: 'reduce' })
   const page = await context.newPage()
-  const response = await page.goto('http://127.0.0.1:4174' + url({ background: '#ffffff' }, 'line'))
+  const fonts: string[] = []
+  page.on('request', request => { if (request.url().endsWith('.woff2')) fonts.push(request.url()) })
+  const response = await page.goto('http://127.0.0.1:4174' + url({ background: '#ffffff', waterLook: 'reflective' }, 'line'))
   await expect(page.locator('html')).toHaveAttribute('data-view', 'static')
   await expect(page.locator('html')).toHaveAttribute('data-font', 'selected')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   await expect(page.locator('#tuning')).toHaveCount(0)
+  await expect(page.getByRole('radio', { name: 'Reflective Liquid' })).toHaveCount(0)
+  await expect(page.locator('html')).toHaveCSS('--type', '"Geist Pixel circle"')
+  expect(fonts).toHaveLength(1)
+  expect(fonts[0]).toContain('geist-pixel-circle-')
   await expect(page.locator('link[rel=canonical]')).toHaveAttribute('href', 'https://martinandmartin.tech/')
   expect(response?.headers()['strict-transport-security']).toContain('max-age=')
   expect(response?.headers()['x-content-type-options']).toBe('nosniff')
@@ -137,13 +168,13 @@ test('production ignores tuning parameters, preserves fallback HTML and serves l
   await context.close()
 })
 
-test('JavaScript off uses Square; denied WebGL uses the selected font; a slow font stays monospace', async ({ browser }) => {
+test('JavaScript off and denied WebGL use Circle; a slow font stays monospace', async ({ browser }) => {
   const address = 'http://127.0.0.1:4173'
   const noJS = await browser.newContext({ javaScriptEnabled: false })
   const page = await noJS.newPage()
-  const square = page.waitForResponse(/geist-pixel-square-.*woff2/)
+  const circle = page.waitForResponse(/geist-pixel-circle-.*woff2/)
   await page.goto(address)
-  expect((await square).ok()).toBe(true)
+  expect((await circle).ok()).toBe(true)
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   await noJS.close()
 

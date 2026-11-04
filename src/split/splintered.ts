@@ -3,14 +3,16 @@ import { texture, type GL } from '../gl'
 import { clamp } from '../settings'
 
 const vertex = `#version 300 es
-layout(location=0) in vec3 aCell;
+layout(location=0) in vec4 aCell;
 uniform vec2 uSize, uOffset;
-uniform float uCell, uVariation;
+uniform float uVariation;
 out vec2 vSource;
 flat out vec2 vMin;
+flat out float vCell;
 void main() {
   vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
-  vSource = aCell.xy + corner * uCell;
+  vCell = aCell.w;
+  vSource = aCell.xy + corner * vCell;
   vMin = aCell.xy;
   vec2 p = (vSource + uOffset * (1. + aCell.z * uVariation)) / uSize;
   gl_Position = vec4(2. * p.x - 1., 1. - 2. * p.y, 0., 1.);
@@ -19,14 +21,15 @@ const fragment = `#version 300 es
 precision highp float;
 uniform sampler2D uMask;
 uniform vec2 uSize;
-uniform float uCell, uDensity;
+uniform float uDensity;
 uniform vec3 uPlate;
 in vec2 vSource;
 flat in vec2 vMin;
+flat in float vCell;
 out vec4 outColor;
 void main() {
-  float inset = min(.5/uDensity, uCell*.45);
-  vec2 uv = clamp(vSource, vMin+inset, vMin+uCell-inset) / uSize;
+  float inset = min(.5/uDensity, vCell*.45);
+  vec2 uv = clamp(vSource, vMin+inset, vMin+vCell-inset) / uSize;
   outColor = vec4(uPlate * texture(uMask, uv).a, 1.);
 }`
 
@@ -35,8 +38,8 @@ function cells(gl: GL, group: Group, density: number) {
   const { canvas, block, box } = group
   const rgba = canvas.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, canvas.width, canvas.height).data
   const data: number[] = []
-  const step = PIXEL * block.size
   for (const [index, line] of block.lines.entries()) {
+    const step = PIXEL * line.size
     const x0 = line.x - line.advance / 2 - box.x
     const y0 = line.y - box.y
     for (let iy = Math.floor(-line.ascent / step); iy < Math.ceil(line.descent / step); iy++) {
@@ -53,7 +56,7 @@ function cells(gl: GL, group: Group, density: number) {
         if (!ink) continue
         let hash = Math.imul(ix + 997, 73856093) ^ Math.imul(iy + 997, 19349663) ^ Math.imul(index + 1, 83492791)
         hash = Math.imul(hash ^ (hash >>> 16), 0x45d9f3b)
-        data.push(x, y, ((hash ^ (hash >>> 16)) >>> 0) / 2147483648 - 1)
+        data.push(x, y, ((hash ^ (hash >>> 16)) >>> 0) / 2147483648 - 1, step)
       }
     }
   }
@@ -63,10 +66,10 @@ function cells(gl: GL, group: Group, density: number) {
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW)
   gl.enableVertexAttribArray(0)
-  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 12, 0)
+  gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 16, 0)
   gl.vertexAttribDivisor(0, 1)
   gl.bindVertexArray(null)
-  return group.instance = { vao, buffer, count: data.length / 3 }
+  return group.instance = { vao, buffer, count: data.length / 4 }
 }
 
 const colors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]] as const
@@ -84,7 +87,6 @@ export const splintered: Strategy = {
     texture(gl, 0, group.mask)
     program.i('uMask', 0)
     program.v2('uSize', group.canvas.width / density, group.canvas.height / density)
-    program.f('uCell', PIXEL * group.block.size)
     program.f('uDensity', density)
     program.f('uVariation', variation)
     gl.bindVertexArray(instance.vao)

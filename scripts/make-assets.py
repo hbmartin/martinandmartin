@@ -2,8 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["fonttools==4.63.0", "brotli==1.2.0", "pillow==12.1.1"]
 # ///
-"""Regenerate the five local fonts, the social card and the favicon."""
-from concurrent.futures import ThreadPoolExecutor
+"""Regenerate the local Circle font, the social card and the favicon."""
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -17,7 +16,6 @@ ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = ROOT / "public"
 ASSETS = PUBLIC / "assets"
 UPSTREAM = "https://raw.githubusercontent.com/vercel/geist-font/7e42eff/"
-SHAPES = ["Square", "Circle", "Grid", "Triangle", "Line"]
 COPY = "Martin & Coming soon to a supply chain near you."
 
 def fetch(path):
@@ -41,20 +39,18 @@ def font_asset(shape):
     return shape.lower(), "/assets/" + name, original
 
 ASSETS.mkdir(exist_ok=True, parents=True)
-with ThreadPoolExecutor() as pool:
-    fonts = list(pool.map(font_asset, SHAPES))
-manifest = {key: url for key, url, _ in fonts}
+key, url, original = font_asset("Circle")
+manifest = {key: url}
 for asset in ASSETS.glob("geist-pixel-*.woff2"):
     if "/assets/" + asset.name not in manifest.values():
         asset.unlink()
 (ROOT / "src/font-assets.json").write_text(json.dumps(manifest, indent=2) + "\n")
 (PUBLIC / "geist-OFL.txt").write_bytes(fetch("OFL.txt"))
 
-original = fonts[0][2]
-font = ImageFont.truetype(BytesIO(original), 242)
 mask = Image.new("L", (1200, 630))
 draw = ImageDraw.Draw(mask)
 for word, y in zip(("Martin", "&", "Martin"), (119, 315, 511)):
+    font = ImageFont.truetype(BytesIO(original), round(242 * (.9 if word == "&" else 1)))
     l, t, r, b = font.getbbox(word)
     draw.text((600 - (l + r) / 2, y - (t + b) / 2), word, fill=255,
               font=font)

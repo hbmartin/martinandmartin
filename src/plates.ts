@@ -1,6 +1,6 @@
 import { Program, fullVertex, texture, type GL } from './gl'
 import type { TextBlock, Rect } from './layout'
-import { ZERO, type Settings, type Shape, type Vec } from './settings'
+import { ZERO, type Settings, type Vec } from './settings'
 
 export type Offsets = readonly [Vec, Vec, Vec]
 export const aligned: Offsets = [ZERO, ZERO, ZERO]
@@ -19,7 +19,6 @@ export interface PlateContext {
   group: Group
   density: number
   teaser: boolean
-  shape: Shape
   lineHeight: number
   wordSize: number
   pointer: Vec
@@ -40,11 +39,10 @@ export function plateOffsets(ctx: PlateContext): Offsets {
   return [offset(-angle, settings.cyan), offset(0, settings.magenta), offset(angle, settings.yellow)]
 }
 
-// A conservative bound on the span between any two plate fragments. Line
-// uses a half-height mark; Grid leaves a four-unit inset on either side.
+// Keep the span between teaser plates below half a Circle dot's width.
 export function teaserOffsets(ctx: PlateContext, offsets: Offsets, variation = 0): Offsets {
   if (!ctx.teaser) return offsets
-  const strokeEm = { square: .038, circle: .038, grid: .030, triangle: .019, line: .019 }[ctx.shape]
+  const strokeEm = .038
   const radius = Math.max(...offsets.map(([x, y]) => Math.hypot(x, y)))
   const scale = radius > 0 ? Math.min(.4, (strokeEm * ctx.group.block.size * .5) / (2 * radius * (1 + variation))) : 0
   return offsets.map(([x, y]) => [x * scale, y * scale]) as unknown as Offsets

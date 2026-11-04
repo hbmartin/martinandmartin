@@ -1,7 +1,8 @@
 {
   "approved": false,
   "settings": {
-    "style": "splintered",
-    "shape": "random"
+    "style": "smooth",
+    "shape": "circle",
+    "waterLook": "quiet"
   }
 }
