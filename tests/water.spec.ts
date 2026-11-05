@@ -1,12 +1,15 @@
 import { test, expect, type Page } from '@playwright/test'
 import { PNG } from 'pngjs'
+import { PIXEL } from '../src/plates'
 
-// Drive the real built renderer at exact times without a test API in the app.
+// Drive RAF and the startup clock at exact times without a test API in the app.
+// Browser timers stay real so font timeouts still exercise the actual fallback.
 // The shader, drop scheduler, input handling and compositing all run unchanged.
 async function installClock(page: Page) {
   await page.addInitScript(() => {
     let seed = 17, timestamp = 0, id = 0
     const callbacks = new Map<number, FrameRequestCallback>()
+    performance.now = () => timestamp
     Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2 ** 32 }
     window.requestAnimationFrame = callback => { callbacks.set(++id, callback); return id }
     window.cancelAnimationFrame = key => { callbacks.delete(key) }
@@ -31,10 +34,7 @@ async function controlled(page: Page, settings: object = {}) {
   await page.goto('/?' + new URLSearchParams({ tune: '', v: '1', shape: 'line', settings: JSON.stringify({
     split: 0, lag: 0, dropMin: 6, dropMax: 6, lifetime: 1, ...settings,
   }) }))
-  await expect(page.locator('html')).toHaveAttribute('data-view', 'canvas')
-  await page.getByRole('button', { name: 'Hide', exact: true }).click()
-  await advance(page, 16)
-  await advance(page, 3000)
+  await settleOpening(page)
 }
 
 async function advance(page: Page, duration: number, step = 16) {
@@ -46,6 +46,10 @@ async function advance(page: Page, duration: number, step = 16) {
 
 async function restart(page: Page, step = 16) {
   await page.reload()
+  await settleOpening(page, step)
+}
+
+async function settleOpening(page: Page, step = 16) {
   await expect(page.locator('html')).toHaveAttribute('data-view', 'canvas')
   await page.getByRole('button', { name: 'Hide', exact: true }).click()
   await advance(page, step, step)
@@ -82,11 +86,11 @@ function difference(a: PNG, b: PNG) {
   return changed
 }
 
-function coloredPixels(image: PNG) {
+function coloredPixels(image: PNG, threshold = 25) {
   let count = 0
   for (let i = 0; i < image.data.length; i += 4) {
     const rgb = [...image.data.subarray(i, i + 3)]
-    if (Math.max(...rgb) - Math.min(...rgb) > 25) count++
+    if (Math.max(...rgb) - Math.min(...rgb) > threshold) count++
   }
   return count
 }
@@ -128,9 +132,6 @@ for (const build of ['review', 'production']) {
 
 test('font-pending mouse input initializes the follow position and opening replay preserves it', async ({ page }) => {
   await installClock(page)
-  // Hold the startup budget steady while the font is gated; RAF time still
-  // advances explicitly, and the font timeout remains a real browser timer.
-  await page.addInitScript(() => { performance.now = () => 0 })
   let releaseFont!: () => void
   const fontGate = new Promise<void>(resolve => { releaseFont = resolve })
   await page.route('**/*.woff2', async route => { await fontGate; await route.continue() })
@@ -193,12 +194,7 @@ test('water is elapsed-time deterministic, refracts CMY, and settles completely'
   await advance(page, 480, 16)
   const slow = await frame(page)
   expect(difference(still, slow)).toBeGreaterThan(150)
-  let colored = 0
-  for (let i = 0; i < slow.data.length; i += 4) {
-    const rgb = [...slow.data.subarray(i, i + 3)]
-    if (Math.max(...rgb) - Math.min(...rgb) > 25) colored++
-  }
-  expect(colored).toBeGreaterThan(25)
+  expect(coloredPixels(slow)).toBeGreaterThan(25)
   await testInfo.attach('quiet-wave', { body: PNG.sync.write(slow), contentType: 'image/png' })
   await advance(page, 528)
   expect(difference(still, await frame(page))).toBe(0)
@@ -238,6 +234,14 @@ test('both looks share refraction, overlapping drops change the surface, and rep
 })
 
 test('switching water treatments preserves the next rain event', async ({ page }) => {
+  let firstFont = true
+  await page.route('**/*.woff2', async route => {
+    if (firstFont) {
+      firstFont = false
+      await new Promise(resolve => setTimeout(resolve, 700))
+    }
+    await route.continue()
+  })
   await controlled(page, { highlight: 0 })
   await advance(page, 4200)
   const uninterrupted = await frame(page)
@@ -249,6 +253,67 @@ test('switching water treatments preserves the next rain event', async ({ page }
   expect(difference(uninterrupted, await frame(page))).toBe(0)
 })
 
+test('context recovery clears waves and waits a full rain interval for a fresh drop', async ({ page }) => {
+  const errors = renderingErrors(page)
+  await controlled(page, { lifetime: 4.5 })
+  await advance(page, 3000)
+  const still = await frame(page)
+  await page.evaluate(() => new Promise<void>(resolve => {
+    const canvas = document.querySelector<HTMLCanvasElement>('#stage')!
+    const extension = canvas.getContext('webgl2')!.getExtension('WEBGL_lose_context')!
+    canvas.addEventListener('webglcontextlost', () => {
+      setTimeout(() => extension.restoreContext(), 80)
+    }, { once: true })
+    canvas.addEventListener('webglcontextrestored', () => resolve(), { once: true })
+    extension.loseContext()
+  }))
+  await expect(page.locator('html')).toHaveAttribute('data-view', 'canvas')
+  expect(difference(still, await frame(page))).toBe(0)
+  // Establish the resumed RAF timestamp without advancing the simulation.
+  await advance(page, 0)
+  await advance(page, 5999)
+  expect(difference(still, await frame(page))).toBe(0)
+  await advance(page, 481)
+  expect(difference(still, await frame(page))).toBeGreaterThan(150)
+  expect(errors).toEqual([])
+})
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 667 }]) {
+  test(`snapped title lines move by their own dot spacing at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await controlled(page, { style: 'snapped', split: 15, fan: 0, cyan: 1, magenta: 1, yellow: 1,
+      bend: 0, shimmer: 0, highlight: 0 })
+    const lines = await page.locator('h1 span').evaluateAll(elements => elements.map(el => {
+      const box = el.getBoundingClientRect()
+      return { top: box.top, bottom: box.bottom, size: parseFloat(getComputedStyle(el).fontSize) }
+    }))
+    const still = await frame(page)
+    await page.mouse.move(viewport.width - 1, viewport.height / 2)
+    await advance(page, 0)
+    const shifted = await frame(page)
+    function center(image: PNG, top: number, bottom: number) {
+      let weight = 0, moment = 0
+      for (let y = Math.max(0, Math.floor(top)); y < Math.min(image.height, Math.ceil(bottom)); y++) {
+        for (let x = 0; x < image.width; x++) {
+          const light = Math.max(0, image.data[(y * image.width + x) * 4] - 10)
+          weight += light
+          moment += light * x
+        }
+      }
+      expect(weight).toBeGreaterThan(0)
+      return moment / weight
+    }
+    // Equal plate depths and zero fan translate white glyphs without CMY mixing.
+    const distance = lines[0].size * .95 * .15 * (1 - 2 / viewport.width)
+    for (const line of lines) {
+      const cell = line.size * PIXEL
+      const expected = Math.round(distance / cell) * cell
+      const actual = center(shifted, line.top, line.bottom) - center(still, line.top, line.bottom)
+      expect(Math.abs(actual - expected)).toBeLessThan(.5)
+    }
+  })
+}
+
 test('all review split styles support the smaller Circle ampersand', async ({ page }) => {
   const errors = renderingErrors(page)
   await controlled(page, { split: 3 })
@@ -258,12 +323,7 @@ test('all review split styles support the smaller Circle ampersand', async ({ pa
     await advance(page, 16)
     await expect(page.locator('html')).toHaveAttribute('data-view', 'canvas')
     const image = await frame(page)
-    let colored = 0
-    for (let i = 0; i < image.data.length; i += 4) {
-      const rgb = [...image.data.subarray(i, i + 3)]
-      if (Math.max(...rgb) - Math.min(...rgb) > 50) colored++
-    }
-    expect(colored).toBeGreaterThan(100)
+    expect(coloredPixels(image, 50)).toBeGreaterThan(100)
   }
   expect(errors).toEqual([])
 })

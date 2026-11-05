@@ -162,8 +162,7 @@ function panel(settings: Settings, api: Controls) {
     url.hash = ''
     url.searchParams.set('tune', '')
     url.searchParams.set('v', '1')
-    const { shape: _shape, ...values } = settings
-    url.searchParams.set('settings', JSON.stringify(values))
+    url.searchParams.set('settings', JSON.stringify(settings))
     try {
       await navigator.clipboard.writeText(url.href)
       manual.hidden = true

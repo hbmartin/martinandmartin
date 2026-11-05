@@ -103,6 +103,7 @@ test('review settings, shortcuts and water look round-trip while legacy shapes a
   const copied = browserName === 'chromium' ? await page.evaluate(() => navigator.clipboard.readText())
     : await page.getByRole('textbox', { name: 'Shareable preview URL' }).inputValue()
   expect(new URL(copied).searchParams.has('shape')).toBe(false)
+  expect(JSON.parse(new URL(copied).searchParams.get('settings')!)).not.toHaveProperty('shape')
   await page.goto(copied)
   await expect(page.getByRole('radio', { name: 'Pixel-snapped' })).toBeChecked()
   await expect(page.getByRole('radio', { name: 'Reflective Liquid' })).toBeChecked()

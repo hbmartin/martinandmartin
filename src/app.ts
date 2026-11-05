@@ -80,11 +80,11 @@ export async function start(setup: Setup) {
     driftStart = clock + introDuration
   }
   function delay() { return (settings.dropMin + Math.random() * (settings.dropMax - settings.dropMin)) * 1000 }
-  function addDrop(x: number, y: number, strength = 1.25, radius = .032, born = clock) {
+  function addDrop(x: number, y: number, strength = 1.25, width = .032, born = clock) {
     if (!renderer || !layout || drops.length === MAX_RINGS) return
-    // Store viewport-relative positions and a radius relative to the short edge.
+    // Store viewport-relative positions and packet width relative to the short edge.
     // Resizing preserves the surface instead of restarting or stretching a ring.
-    drops.push({ x: x / layout.width, y: y / layout.height, born, strength, radius })
+    drops.push({ x: x / layout.width, y: y / layout.height, born, strength, width })
     redraw = true
   }
   function randomDrop(born: number) {
@@ -191,6 +191,8 @@ export async function start(setup: Setup) {
     // The old drawing resources belonged to the lost context.
     introStart = clock - introDuration
     resetRain()
+    openingRain = true
+    nextDrop = clock + delay()
     activate(true)
   })
 

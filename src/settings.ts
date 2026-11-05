@@ -3,7 +3,6 @@ export type Style = 'splintered' | 'smooth' | 'snapped'
 export type WaterLook = 'quiet' | 'reflective'
 export interface Settings {
   style: Style
-  shape: 'circle'
   waterLook: WaterLook
   split: number
   cyan: number
@@ -23,7 +22,7 @@ export interface Settings {
 }
 
 export const defaults: Readonly<Settings> = {
-  style: 'smooth', shape: 'circle', waterLook: 'quiet', split: 4.5, cyan: 1, magenta: .7, yellow: .45,
+  style: 'smooth', waterLook: 'quiet', split: 4.5, cyan: 1, magenta: .7, yellow: .45,
   fan: 120, variation: 40, lag: 250, dropMin: 2.5, dropMax: 5, lifetime: 4.5,
   bend: 1.5, shimmer: 15, highlight: 8, teaserRipple: 20, background: '#0a0a0a',
 }

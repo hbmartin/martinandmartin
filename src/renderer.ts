@@ -1,12 +1,12 @@
 import { Program, fullVertex, newTexture, texture, type GL } from './gl'
 import { textStyle, type Layout, type TextBlock } from './layout'
-import { aligned, drawOffsets, makeOffsetProgram, type Group, type Strategy } from './plates'
+import { aligned, drawOffsets, makeOffsetProgram, type Group, type PlateContext, type Strategy } from './plates'
 import type { Settings, Vec } from './settings'
 
 export const MAX_RINGS = 16
 export interface Ring {
-  /** Viewport fractions; radius is a fraction of the viewport's short edge. */
-  x: number; y: number; born: number; strength: number; radius: number
+  /** Viewport fractions; packet width is a fraction of the viewport's short edge. */
+  x: number; y: number; born: number; strength: number; width: number
 }
 
 const water = `#version 300 es
@@ -27,6 +27,7 @@ vec3 coverage(sampler2D plates, vec4 box, vec2 p, vec2 bend) {
   uv.y = 1.-uv.y;
   if (any(lessThan(uv,vec2(0.))) || any(greaterThan(uv,vec2(1.)))) return vec3(0.);
   vec2 shift = vec2(bend.x,-bend.y)/box.zw;
+  if (uShimmer == 0. || all(equal(shift,vec2(0.)))) return texture(plates,uv+shift).rgb;
   return vec3(texture(plates, uv+shift*(1.+uShimmer)).r,
               texture(plates, uv+shift).g,
               texture(plates, uv+shift*(1.-uShimmer)).b);
@@ -202,7 +203,8 @@ export class Renderer {
       this.groups.forEach((group, i) => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, group.framebuffer)
         gl.viewport(0, 0, group.canvas.width, group.canvas.height)
-        const draw = (offsets: Parameters<typeof drawOffsets>[4]) => drawOffsets(gl, this.offset, group, density, offsets)
+        const draw: PlateContext['drawOffsets'] = (offsets, line) =>
+          drawOffsets(gl, this.offset, group, density, offsets, line)
         if (settings.split === 0 || (pointer[0] === 0 && pointer[1] === 0)) draw(aligned)
         else strategy.draw({ gl, group, density, teaser: i === 1, pointer, settings,
           lineHeight: layout.lineHeight, wordSize: layout.word.size, drawOffsets: draw, program: this.program })
@@ -233,10 +235,14 @@ export class Renderer {
     program.f('uHighlight', settings.highlight / 100)
     program.f('uTeaserStrength', settings.teaserRipple / 100)
     program.f('uReflective', settings.waterLook === 'reflective' ? 1 : 0)
-    drops.forEach(({ x, y, born, strength, radius }, i) => {
+    drops.forEach(({ x, y, born, strength, width }, i) => {
       const age = Math.max(0, (now - born) / 1000)
-      this.rings.set([x * layout.width, y * layout.height, age, age / settings.lifetime], i * 4)
-      this.dropParams.set([strength, radius], i * 2)
+      this.rings[i * 4] = x * layout.width
+      this.rings[i * 4 + 1] = y * layout.height
+      this.rings[i * 4 + 2] = age
+      this.rings[i * 4 + 3] = age / settings.lifetime
+      this.dropParams[i * 2] = strength
+      this.dropParams[i * 2 + 1] = width
     })
     program.i('uRingCount', drops.length)
     if (drops.length) {
